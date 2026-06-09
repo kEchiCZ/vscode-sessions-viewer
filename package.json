@@ -1,0 +1,35 @@
+{
+  "name": "vscode-sessions-viewer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -n api,web -c cyan,magenta \"tsx watch server/index.ts\" \"vite --host 127.0.0.1\"",
+    "build": "npm run build:client && npm run build:server",
+    "build:client": "tsc -p tsconfig.app.json --noEmit && vite build",
+    "build:server": "tsc -p server/tsconfig.json",
+    "typecheck": "tsc -p tsconfig.app.json --noEmit && tsc -p server/tsconfig.json --noEmit",
+    "start": "node dist/server/index.js"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "chokidar": "latest",
+    "cors": "latest",
+    "express": "latest",
+    "fast-glob": "latest",
+    "lucide-react": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "vite": "latest"
+  },
+  "devDependencies": {
+    "@types/cors": "latest",
+    "@types/express": "latest",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "concurrently": "latest",
+    "tsx": "latest",
+    "typescript": "latest"
+  }
+}
