@@ -6,7 +6,7 @@ import { VsCodeTranscriptSource } from './sources/VsCodeTranscriptSource.js';
 const config = loadConfig();
 const app = express();
 const source = new VsCodeTranscriptSource({
-  workspaceStorageRoot: config.workspaceStorageRoot,
+  workspaceStorageRoots: config.workspaceStorageRoots,
   directCopilotSessionRoot: config.directCopilotSessionRoot,
   pollIntervalMs: config.pollIntervalMs
 });
@@ -25,7 +25,7 @@ app.get('/api/sessions', (request, response) => {
 
   const sessions = snapshot.sessions.filter((session) => {
     const matchesQuery = q
-      ? [session.id, session.workspaceStorageId, session.firstUserMessage, session.producer]
+      ? [session.id, session.workspaceStorageId, session.workspaceName, session.product, session.firstUserMessage, session.producer]
           .filter(Boolean)
           .some((value) => value?.toLowerCase().includes(q))
       : true;
@@ -77,6 +77,13 @@ await source.start();
 
 const server = app.listen(config.port, '127.0.0.1', () => {
   console.log(`Sessions API listening on http://127.0.0.1:${config.port}`);
+  const scanned = config.directCopilotSessionRoot
+    ? [config.directCopilotSessionRoot]
+    : config.workspaceStorageRoots;
+  console.log(`Scanning ${scanned.length} storage root(s):`);
+  for (const root of scanned) {
+    console.log(`  - ${root}`);
+  }
 });
 
 async function shutdown(): Promise<void> {

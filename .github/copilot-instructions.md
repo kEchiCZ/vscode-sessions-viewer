@@ -23,7 +23,8 @@
 
 ## Zdroj dat
 
-- Výchozí root dat je macOS VS Code `~/Library/Application Support/Code/User/workspaceStorage`.
+- Výchozí root dat se detekuje automaticky pro všechny varianty postavené na VS Code (Code, Insiders, VSCodium, Cursor, Windsurf, Antigravity, Devin…) napříč macOS, Windows i Linuxem.
+- Skenování je multi-root; cesty normalizuj na POSIX oddělovače (`toPosix`), protože fast-glob i parsing segmentů to vyžadují na Windows.
 - Konfigurace je v `server/config.ts`.
 - Podporuj proměnné `PORT`, `VSCODE_WORKSPACE_STORAGE_ROOT`, `VSCODE_COPILOT_SESSION_ROOT`, `SESSION_POLL_INTERVAL_MS`.
 - Skenuj transcript soubory `GitHub.copilot-chat/transcripts/*.jsonl`.

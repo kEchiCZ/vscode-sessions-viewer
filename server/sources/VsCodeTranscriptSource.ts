@@ -8,7 +8,7 @@ import fg from 'fast-glob';
 import type { AgentInfo, ContextSizes, NormalizedSession, SessionOverview, SessionSource, SessionSourceSnapshot, SkillInfo, ToolCallInfo, ToolInfo, TurnInfo } from './SessionSource.js';
 
 interface VsCodeTranscriptSourceOptions {
-  workspaceStorageRoot: string;
+  workspaceStorageRoots: string[];
   directCopilotSessionRoot?: string;
   pollIntervalMs: number;
 }
@@ -17,6 +17,7 @@ interface SessionAccumulator {
   id: string;
   workspaceStorageId: string;
   workspaceName?: string;
+  product?: string;
   sourcePaths: {
     transcript?: string;
     debugLog?: string;
@@ -145,12 +146,13 @@ export class VsCodeTranscriptSource implements SessionSource {
   private async findCandidateFiles(): Promise<{ transcripts: string[]; debugLogs: string[] }> {
     const roots = this.options.directCopilotSessionRoot
       ? [this.options.directCopilotSessionRoot]
-      : [this.options.workspaceStorageRoot];
+      : this.options.workspaceStorageRoots;
 
-    const transcriptPatterns = roots.map((root) => path.join(root, '**', 'GitHub.copilot-chat', 'transcripts', '*.jsonl'));
+    // fast-glob always expects POSIX separators, even on Windows.
+    const transcriptPatterns = roots.map((root) => toPosix(path.join(root, '**', 'GitHub.copilot-chat', 'transcripts', '*.jsonl')));
     const debugPatterns = roots.flatMap((root) => [
-      path.join(root, '**', 'GitHub.copilot-chat', 'debug-logs', '*', 'main.jsonl'),
-      path.join(root, '**', 'GitHub.copilot-chat', 'debug-logs', '*', '*.jsonl')
+      toPosix(path.join(root, '**', 'GitHub.copilot-chat', 'debug-logs', '*', 'main.jsonl')),
+      toPosix(path.join(root, '**', 'GitHub.copilot-chat', 'debug-logs', '*', '*.jsonl'))
     ]);
 
     const [transcripts, debugLogs] = await Promise.all([
@@ -208,11 +210,13 @@ export class VsCodeTranscriptSource implements SessionSource {
     }
 
     const workspaceStorageId = this.extractWorkspaceStorageId(filePath);
-    const workspaceName = await this.resolveWorkspaceName(workspaceStorageId);
+    const workspaceName = await this.resolveWorkspaceName(filePath);
+    const product = this.extractProduct(filePath);
     const accumulator: SessionAccumulator = {
       id,
       workspaceStorageId,
       workspaceName,
+      product,
       sourcePaths: {},
       producer: kind === 'debugLog' ? 'VS Code Copilot Chat debug log' : 'VS Code Copilot Chat transcript',
       messageCount: 0,
@@ -234,7 +238,8 @@ export class VsCodeTranscriptSource implements SessionSource {
   }
 
   private extractSessionId(filePath: string, kind: 'transcript' | 'debugLog'): string {
-    const parts = filePath.split(path.sep);
+    // fast-glob returns POSIX paths; split on '/' so this works on Windows too.
+    const parts = toPosix(filePath).split('/');
     const debugIndex = parts.lastIndexOf('debug-logs');
     if (debugIndex >= 0 && parts[debugIndex + 1]) {
       return parts[debugIndex + 1];
@@ -248,12 +253,27 @@ export class VsCodeTranscriptSource implements SessionSource {
   }
 
   private extractWorkspaceStorageId(filePath: string): string {
-    const relative = path.relative(this.options.workspaceStorageRoot, filePath);
-    if (!relative.startsWith('..')) {
-      return relative.split(path.sep)[0] ?? 'direct';
+    // Root-agnostic: the storage id is the segment right after `workspaceStorage`,
+    // regardless of which VS Code-family product the file belongs to.
+    const parts = toPosix(filePath).split('/');
+    const index = parts.lastIndexOf('workspaceStorage');
+    if (index >= 0 && parts[index + 1]) {
+      return parts[index + 1];
     }
 
     return 'direct';
+  }
+
+  // Friendly product name (VS Code, Insiders, Windsurf, Antigravity, ...) derived
+  // from the `<product>/User/workspaceStorage/...` layout in the path.
+  private extractProduct(filePath: string): string | undefined {
+    const parts = toPosix(filePath).split('/');
+    const index = parts.lastIndexOf('workspaceStorage');
+    if (index >= 2 && parts[index - 1] === 'User') {
+      return friendlyProductName(parts[index - 2]);
+    }
+
+    return undefined;
   }
 
   private async readJsonl(filePath: string, onEntry: (entry: unknown) => void): Promise<void> {
@@ -342,10 +362,16 @@ export class VsCodeTranscriptSource implements SessionSource {
     this.consumeCost(accumulator, fields);
   }
 
-  private async resolveWorkspaceName(workspaceStorageId: string): Promise<string | undefined> {
-    if (workspaceStorageId === 'direct') return undefined;
+  private async resolveWorkspaceName(filePath: string): Promise<string | undefined> {
+    // Derive the workspace dir directly from the source path so it works across
+    // every scanned root (`.../workspaceStorage/<id>/workspace.json`).
+    const parts = toPosix(filePath).split('/');
+    const index = parts.lastIndexOf('workspaceStorage');
+    if (index < 0 || !parts[index + 1]) return undefined;
     try {
-      const workspaceJsonPath = path.join(this.options.workspaceStorageRoot, workspaceStorageId, 'workspace.json');
+      // Keep POSIX joins to preserve a leading "/" on macOS/Linux; Node accepts
+      // forward slashes on Windows too.
+      const workspaceJsonPath = `${parts.slice(0, index + 2).join('/')}/workspace.json`;
       const raw = await fs.readFile(workspaceJsonPath, 'utf8');
       const parsed = JSON.parse(raw) as Record<string, unknown>;
       const uri = (parsed.folder ?? parsed.workspace) as string | undefined;
@@ -364,6 +390,7 @@ export class VsCodeTranscriptSource implements SessionSource {
       id: accumulator.id,
       workspaceStorageId: accumulator.workspaceStorageId,
       workspaceName: accumulator.workspaceName,
+      product: accumulator.product,
       sourcePaths: accumulator.sourcePaths,
       startTime: accumulator.startTime,
       updatedAt,
@@ -538,11 +565,11 @@ export class VsCodeTranscriptSource implements SessionSource {
     const dir = path.dirname(session.sourcePaths.debugLog);
 
     // Find system_prompt and tools files (use index 0 as the first turn's context)
-    const systemPromptFiles = await fg(path.join(dir, 'system_prompt_*.json').replace(/\\/g, '/'), {
+    const systemPromptFiles = await fg(toPosix(path.join(dir, 'system_prompt_*.json')), {
       onlyFiles: true,
       suppressErrors: true
     });
-    const toolsFiles = await fg(path.join(dir, 'tools_*.json').replace(/\\/g, '/'), {
+    const toolsFiles = await fg(toPosix(path.join(dir, 'tools_*.json')), {
       onlyFiles: true,
       suppressErrors: true
     });
@@ -811,7 +838,35 @@ function extractToolDetail(name: string, args: Record<string, unknown>): string 
   }
 }
 
-function minIso(current: string | undefined, candidate: string): string {  return !current || candidate < current ? candidate : current;
+// Normalize Windows backslash paths to POSIX separators. fast-glob requires this,
+// and it keeps path-segment parsing consistent across platforms.
+function toPosix(filePath: string): string {
+  return filePath.replace(/\\/g, '/');
+}
+
+// Map a VS Code-family product directory name to a human-friendly label.
+function friendlyProductName(dirName: string): string {
+  const map: Record<string, string> = {
+    Code: 'VS Code',
+    'Code - Insiders': 'VS Code Insiders',
+    'Code - Exploration': 'VS Code Exploration',
+    VSCodium: 'VSCodium',
+    'VSCodium - Insiders': 'VSCodium Insiders',
+    Cursor: 'Cursor',
+    'Cursor Nightly': 'Cursor Nightly',
+    Windsurf: 'Windsurf',
+    'Windsurf - Next': 'Windsurf Next',
+    Antigravity: 'Antigravity',
+    Devin: 'Devin',
+    Trae: 'Trae',
+    'Trae CN': 'Trae CN',
+    Positron: 'Positron'
+  };
+  return map[dirName] ?? dirName;
+}
+
+function minIso(current: string | undefined, candidate: string): string {
+  return !current || candidate < current ? candidate : current;
 }
 
 function maxIso(current: string | undefined, candidate: string): string {

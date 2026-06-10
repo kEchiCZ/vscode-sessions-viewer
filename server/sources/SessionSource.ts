@@ -18,6 +18,7 @@ export interface NormalizedSession {
   id: string;
   workspaceStorageId: string;
   workspaceName?: string;
+  product?: string;
   sourcePaths: SourceFileInfo;
   startTime?: string;
   updatedAt: string;

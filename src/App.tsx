@@ -10,6 +10,7 @@ interface NormalizedSession {
   id: string;
   workspaceStorageId: string;
   workspaceName?: string;
+  product?: string;
   sourcePaths: SourceFileInfo;
   startTime?: string;
   updatedAt: string;
@@ -208,7 +209,7 @@ export default function App() {
       if (fromDate && updatedAt < fromDate) return false;
       if (toDate && updatedAt > toDate) return false;
       const matchesQuery = normalizedQuery
-        ? [session.id, session.workspaceStorageId, session.workspaceName, session.firstUserMessage, session.producer]
+        ? [session.id, session.workspaceStorageId, session.workspaceName, session.product, session.firstUserMessage, session.producer]
             .filter(Boolean)
             .some((value) => value?.toLowerCase().includes(normalizedQuery))
         : true;
@@ -362,7 +363,10 @@ export default function App() {
             >
               <span className="summary-cell">
                 <strong>{truncate(session.firstUserMessage ?? 'Untitled session', 60)}</strong>
-                <small>{session.workspaceName ?? session.workspaceStorageId}</small>
+                <small>
+                  {session.workspaceName ?? session.workspaceStorageId}
+                  {session.product ? <span className="product-tag">{session.product}</span> : null}
+                </small>
               </span>
               <span>{formatDateTime(session.updatedAt)}</span>
               <span className="stats-cell">
@@ -396,7 +400,7 @@ export default function App() {
             <>
               <div className="detail-heading">
                 <h2>{selectedSession.firstUserMessage ?? selectedSession.id}</h2>
-                <span>{selectedSession.producer}</span>
+                <span>{selectedSession.product ? `${selectedSession.product} · ` : ''}{selectedSession.producer}</span>
               </div>
 
               <dl>
