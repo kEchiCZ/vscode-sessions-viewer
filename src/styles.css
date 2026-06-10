@@ -402,6 +402,16 @@ input::placeholder {
   color: #999999;
 }
 
+.product-tag {
+  margin-left: 7px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: rgba(120, 170, 255, 0.14);
+  color: #9ec1ff;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
 .aic-cell {
   display: flex;
   align-items: center;
