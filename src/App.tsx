@@ -31,6 +31,7 @@ interface NormalizedSession {
     outputTokens?: number;
     cachedTokens?: number;
     requestCount?: number;
+    usdCost?: number;
     models: string[];
   };
 }
@@ -49,6 +50,7 @@ interface TurnInfo {
   outputTokens: number;
   cachedTokens: number;
   aiCredits?: number;
+  usdCost?: number;
   llmRequestCount: number;
   toolCalls: ToolCallInfo[];
   subTurnCount: number;
@@ -222,6 +224,11 @@ export default function App() {
   const selectedSession = filteredSessions.find((session) => session.id === selectedId) ?? filteredSessions[0];
   const selectedCost = selectedSession?.cost ?? { models: [] };
   const detailSession = sessions.find((s) => s.id === detailSessionId);
+  const totalKc = filteredSessions.reduce((sum, s) => {
+    if (s.cost.aiCredits !== undefined) return sum + s.cost.aiCredits / 4.8;
+    if (s.cost.usdCost !== undefined) return sum + s.cost.usdCost * 23;
+    return sum;
+  }, 0);
 
   if (detailSessionId && detailSession) {
     const detailCost = detailSession.cost ?? { models: [] };
@@ -241,7 +248,9 @@ export default function App() {
               <Coins size={15} aria-hidden="true" />
               {detailCost.aiCredits !== undefined
                 ? <strong>{formatAic(detailCost.aiCredits)} AIC <span className="kc-price">({aicToKc(detailCost.aiCredits)} Kč)</span></strong>
-                : <span>No AIC data</span>}
+                : detailCost.usdCost !== undefined
+                ? <strong><span className="kc-price">{usdToKc(detailCost.usdCost)} Kč</span></strong>
+                : <span>No cost data</span>}
             </div>
           </div>
         </section>
@@ -334,7 +343,7 @@ export default function App() {
           <span className="meta-aic">
             <Coins size={13} aria-hidden="true" />
             {formatAic(filteredSessions.reduce((sum, s) => sum + (s.cost.aiCredits ?? 0), 0))} AIC
-            <span className="meta-kc">({(filteredSessions.reduce((sum, s) => sum + (s.cost.aiCredits ?? 0), 0) / 4.8).toFixed(0)} Kč)</span>
+            <span className="meta-kc">({totalKc.toFixed(0)} Kč)</span>
           </span>
           <span>{lastRefreshAt ? `Upd. ${formatShortDateTime(lastRefreshAt)}` : 'Waiting for first refresh'}</span>
         </div>
@@ -358,7 +367,7 @@ export default function App() {
             <button
               key={session.id}
               type="button"
-              className={`session-row ${selectedSession?.id === session.id ? 'selected' : ''} ${(session.cost.aiCredits ?? 0) <= 1 ? 'dim' : ''}`}
+              className={`session-row ${selectedSession?.id === session.id ? 'selected' : ''} ${session.cost.aiCredits !== undefined && session.cost.aiCredits <= 1 && !session.cost.usdCost ? 'dim' : ''}`}
               onClick={() => setSelectedId(session.id)}
             >
               <span className="summary-cell">
@@ -376,6 +385,8 @@ export default function App() {
               <span className="aic-cell">
                 {session.cost.aiCredits !== undefined
                   ? <><Coins size={13} aria-hidden="true" />{formatAic(session.cost.aiCredits)}</>
+                  : session.cost.usdCost !== undefined
+                  ? <span className="kc-price">{usdToKc(session.cost.usdCost)} Kč</span>
                   : '—'}
               </span>
               <span className="badge-cell">
@@ -418,7 +429,11 @@ export default function App() {
                   <h3>AI Credits</h3>
                 </div>
                 <div className="cost-total">
-                  {selectedCost.aiCredits === undefined ? 'Not reported' : <>{formatAic(selectedCost.aiCredits)} AIC <span className="kc-price">({aicToKc(selectedCost.aiCredits)} Kč)</span></>}
+                  {selectedCost.aiCredits !== undefined
+                    ? <>{formatAic(selectedCost.aiCredits)} AIC <span className="kc-price">({aicToKc(selectedCost.aiCredits)} Kč)</span></>
+                    : selectedCost.usdCost !== undefined
+                    ? <><span className="kc-price">{usdToKc(selectedCost.usdCost)} Kč</span> <span className="cost-usd">(${selectedCost.usdCost.toFixed(4)})</span></>
+                    : 'Not reported'}
                 </div>
                 <div className="cost-meta">
                   {(selectedCost.inputTokens || selectedCost.outputTokens || selectedCost.cachedTokens) ? (
@@ -452,30 +467,40 @@ export default function App() {
 const STATS_MIN_AIC = 0.1;
 
 function StatsView({ sessions }: { sessions: NormalizedSession[] }) {
-  const qualifying = sessions.filter((s) => (s.cost.aiCredits ?? 0) > STATS_MIN_AIC);
+  const qualifying = sessions.filter((s) =>
+    (s.cost.aiCredits !== undefined && s.cost.aiCredits > STATS_MIN_AIC) ||
+    s.cost.usdCost !== undefined ||
+    (s.cost.inputTokens !== undefined && s.cost.inputTokens > 0) ||
+    (s.cost.outputTokens !== undefined && s.cost.outputTokens > 0)
+  );
   const count = qualifying.length;
 
   const totalInput = qualifying.reduce((sum, s) => sum + (s.cost.inputTokens ?? 0), 0);
   const totalCached = qualifying.reduce((sum, s) => sum + (s.cost.cachedTokens ?? 0), 0);
   const totalOutput = qualifying.reduce((sum, s) => sum + (s.cost.outputTokens ?? 0), 0);
   const totalAic = qualifying.reduce((sum, s) => sum + (s.cost.aiCredits ?? 0), 0);
+  const totalKcFromAic = qualifying.reduce((sum, s) => sum + (s.cost.aiCredits !== undefined ? s.cost.aiCredits / 4.8 : 0), 0);
+  const totalKcFromUsd = qualifying.reduce((sum, s) => sum + (s.cost.usdCost !== undefined ? s.cost.usdCost * 23 : 0), 0);
+  const totalKc = totalKcFromAic + totalKcFromUsd;
 
   const withInput = qualifying.filter((s) => s.cost.inputTokens !== undefined).length;
   const withCached = qualifying.filter((s) => s.cost.cachedTokens !== undefined).length;
   const withOutput = qualifying.filter((s) => s.cost.outputTokens !== undefined).length;
   const withAic = qualifying.filter((s) => s.cost.aiCredits !== undefined).length;
+  const withKc = qualifying.filter((s) => s.cost.aiCredits !== undefined || s.cost.usdCost !== undefined).length;
 
   const avgInput = withInput > 0 ? totalInput / withInput : 0;
   const avgCached = withCached > 0 ? totalCached / withCached : 0;
   const avgOutput = withOutput > 0 ? totalOutput / withOutput : 0;
   const avgAic = withAic > 0 ? totalAic / withAic : 0;
+  const avgKc = withKc > 0 ? totalKc / withKc : 0;
 
   return (
     <div className="stats-view">
       <div className="stats-header">
         <BarChart2 size={18} aria-hidden="true" />
         <span>Statistiky tokenů a nákladů</span>
-        <span className="stats-session-count">{count} sessions &gt; {STATS_MIN_AIC} AIC (z {sessions.length})</span>
+        <span className="stats-session-count">{count} sessions (z {sessions.length})</span>
       </div>
       <div className="stats-grid">
         <div className="stat-card">
@@ -500,11 +525,11 @@ function StatsView({ sessions }: { sessions: NormalizedSession[] }) {
           <div className="stat-card-sub">průměr / session ({withOutput})</div>
         </div>
         <div className="stat-card stat-card--aic">
-          <div className="stat-card-label">AIC náklady</div>
-          <div className="stat-card-total">{formatAic(totalAic)} <span className="stat-aic-unit">AIC</span></div>
-          <div className="stat-card-sub">{(totalAic / 4.8).toFixed(0)} Kč celkem</div>
-          <div className="stat-card-avg">{formatAic(avgAic)} <span className="stat-aic-unit">AIC</span></div>
-          <div className="stat-card-sub">{(avgAic / 4.8).toFixed(2)} Kč průměr / session ({withAic})</div>
+          <div className="stat-card-label">Náklady</div>
+          <div className="stat-card-total">{totalKc.toFixed(1)} <span className="stat-aic-unit">Kč</span></div>
+          <div className="stat-card-sub">{formatAic(totalAic)} AIC + ${(totalKcFromUsd / 23).toFixed(4)} USD</div>
+          <div className="stat-card-avg">{avgKc.toFixed(2)} <span className="stat-aic-unit">Kč</span></div>
+          <div className="stat-card-sub">průměr / session ({withKc})</div>
         </div>
       </div>
     </div>
@@ -569,7 +594,11 @@ function TurnCard({ turn, sessionId }: { turn: TurnInfo; sessionId?: string }) {
       <div className="turn-body">
         <div className="turn-aic">
           <Coins size={14} aria-hidden="true" />
-          {turn.aiCredits !== undefined ? <strong>{formatAic(turn.aiCredits)} AIC <span className="kc-price">({aicToKc(turn.aiCredits)} Kč)</span></strong> : <span className="no-aic">—</span>}
+          {turn.aiCredits !== undefined
+            ? <strong>{formatAic(turn.aiCredits)} AIC <span className="kc-price">({aicToKc(turn.aiCredits)} Kč)</span></strong>
+            : turn.usdCost !== undefined
+            ? <strong><span className="kc-price">{usdToKc(turn.usdCost)} Kč</span></strong>
+            : <span className="no-aic">—</span>}
         </div>
         <div className="turn-chips">
           {turn.inputTokens > 0 ? <span>{formatNumber(turn.inputTokens)} in</span> : null}
@@ -943,4 +972,8 @@ function formatAic(value: number) {
 
 function aicToKc(value: number) {
   return (value / 4.8).toFixed(1);
+}
+
+function usdToKc(usd: number) {
+  return (usd * 23).toFixed(1);
 }

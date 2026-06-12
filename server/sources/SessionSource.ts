@@ -11,6 +11,7 @@ export interface SessionCostInfo {
   outputTokens?: number;
   cachedTokens?: number;
   requestCount?: number;
+  usdCost?: number;
   models: string[];
 }
 
@@ -54,6 +55,7 @@ export interface TurnInfo {
   outputTokens: number;
   cachedTokens: number;
   aiCredits?: number;
+  usdCost?: number;
   llmRequestCount: number;
   toolCalls: ToolCallInfo[];
   subTurnCount: number;

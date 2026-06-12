@@ -1,15 +1,37 @@
 import cors from 'cors';
 import express from 'express';
 import { loadConfig } from './config.js';
+import { AntigravitySource } from './sources/AntigravitySource.js';
+import { ClaudeCodeSource } from './sources/ClaudeCodeSource.js';
+import { DevinSource } from './sources/DevinSource.js';
+import { MultiSource } from './sources/MultiSource.js';
+import { VsCodeChatSessionsSource } from './sources/VsCodeChatSessionsSource.js';
 import { VsCodeTranscriptSource } from './sources/VsCodeTranscriptSource.js';
+import { WindsurfCascadeSource } from './sources/WindsurfCascadeSource.js';
 
 const config = loadConfig();
 const app = express();
-const source = new VsCodeTranscriptSource({
-  workspaceStorageRoots: config.workspaceStorageRoots,
-  directCopilotSessionRoot: config.directCopilotSessionRoot,
-  pollIntervalMs: config.pollIntervalMs
-});
+
+const sources = [
+  new VsCodeTranscriptSource({
+    workspaceStorageRoots: config.workspaceStorageRoots,
+    directCopilotSessionRoot: config.directCopilotSessionRoot,
+    pollIntervalMs: config.pollIntervalMs
+  }),
+  new ClaudeCodeSource(config.pollIntervalMs),
+  new VsCodeChatSessionsSource(config.workspaceStorageRoots, config.pollIntervalMs)
+];
+
+const windsurfSource = WindsurfCascadeSource.create(config.pollIntervalMs);
+if (windsurfSource) sources.push(windsurfSource);
+
+const antigravitySource = AntigravitySource.create(config.pollIntervalMs);
+if (antigravitySource) sources.push(antigravitySource);
+
+const devinSource = DevinSource.create(config.pollIntervalMs);
+if (devinSource) sources.push(devinSource);
+
+const source = new MultiSource(sources);
 
 app.use(cors());
 app.use(express.json());
@@ -77,13 +99,15 @@ await source.start();
 
 const server = app.listen(config.port, '127.0.0.1', () => {
   console.log(`Sessions API listening on http://127.0.0.1:${config.port}`);
-  const scanned = config.directCopilotSessionRoot
-    ? [config.directCopilotSessionRoot]
-    : config.workspaceStorageRoots;
-  console.log(`Scanning ${scanned.length} storage root(s):`);
-  for (const root of scanned) {
-    console.log(`  - ${root}`);
-  }
+  console.log('Sources:');
+  console.log('  [Copilot] workspaceStorage roots:');
+  const copilotRoots = config.directCopilotSessionRoot ? [config.directCopilotSessionRoot] : config.workspaceStorageRoots;
+  for (const root of copilotRoots) console.log(`    - ${root}`);
+  console.log('  [Claude Code] ~/.claude/projects/**/*.jsonl');
+  console.log('  [VS Code Chat] workspaceStorage/**/chatSessions/*.jsonl');
+  if (windsurfSource) console.log('  [Windsurf Cascade] globalStorage/state.vscdb');
+  if (antigravitySource) console.log('  [Antigravity] ~/.gemini/antigravity/brain/');
+  if (devinSource) console.log('  [Devin] devin/cli/sessions.db');
 });
 
 async function shutdown(): Promise<void> {
